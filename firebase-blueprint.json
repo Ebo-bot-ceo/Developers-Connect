@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "teamId": { "type": "string", "description": "ID of the team the user belongs to" }
+      },
+      "required": ["uid", "displayName", "email"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Hackathon team",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "members": { 
+          "type": "array", 
+          "items": { "type": "string" },
+          "maxItems": 10 
+        },
+        "invitedEmails": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Emails of users invited to the team"
+        },
+        "projectId": { "type": "string" }
+      },
+      "required": ["id", "name", "members"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Hackathon project submission",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "demoUrl": { "type": "string" },
+        "techStack": { "type": "array", "items": { "type": "string" } },
+        "challenges": { "type": "string" },
+        "learnings": { "type": "string" },
+        "teamId": { "type": "string" },
+        "imageUrl": { "type": "string", "description": "URL of the project image" },
+        "visibility": { "type": "string", "enum": ["public", "private"], "description": "Project visibility" },
+        "status": { "type": "string", "enum": ["planning", "in-progress", "completed", "demoed"], "description": "Project progress status" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "description", "teamId", "visibility", "status"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Team invitation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "invitedBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "teamId": { "type": "string" },
+        "teamName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "invitedBy", "status", "createdAt", "teamId", "teamName"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/teams/{teamId}": {
+      "schema": "Team",
+      "description": "Hackathon teams"
+    },
+    "/teams/{teamId}/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Team invitations"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Project submissions"
+    }
+  }
+}

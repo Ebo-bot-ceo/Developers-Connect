@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - email: string (required)
+    //   - photoURL: string (optional)
+    //   - teamId: string (optional)
+    //
+    // Collection: teams
+    // Document ID: teamId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - members: list (required) - UIDs of members (max 10)
+    //   - projectId: string (optional)
+    //
+    // Collection: projects
+    // Document ID: projectId
+    // Fields:
+    //   - id: string (required)
+    //   - title: string (required)
+    //   - description: string (required)
+    //   - demoUrl: string (optional)
+    //   - techStack: list (optional)
+    //   - challenges: string (optional)
+    //   - learnings: string (optional)
+    //   - teamId: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Verify UID hasn't been tampered with on create
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    // Ensure uid field is not modified on update
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == resource.data.uid;
+    }
+
+    // Validate that a list is a list and enforces size limits
+    function isValidList(listData, maxSize) {
+      return listData is list && listData.size() <= maxSize;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email']) &&
+             data.uid is string &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             data.email is string &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('teamId' in data) || data.teamId is string);
+    }
+
+    function isValidTeam(data) {
+      return data.keys().hasAll(['id', 'name', 'members']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isValidList(data.members, 10) && data.members.size() > 0 &&
+             (!('projectId' in data) || data.projectId is string) &&
+             (!('invitedEmails' in data) || isValidList(data.invitedEmails, 50));
+    }
+
+    function isValidInvitation(data) {
+      return data.keys().hasAll(['id', 'invitedBy', 'status', 'createdAt', 'teamId', 'teamName']) &&
+             data.id is string &&
+             data.invitedBy is string &&
+             data.status in ['pending', 'accepted', 'declined'] &&
+             data.createdAt is timestamp &&
+             data.teamId is string &&
+             data.teamName is string &&
+             (!('email' in data) || data.email is string);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'title', 'description', 'teamId', 'visibility', 'status', 'createdAt']) &&
+             data.id is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
+             data.teamId is string &&
+             data.visibility in ['public', 'private'] &&
+             data.status in ['planning', 'in-progress', 'completed', 'demoed'] &&
+             data.createdAt is timestamp &&
+             (!('demoUrl' in data) || data.demoUrl is string) &&
+             (!('techStack' in data) || isValidList(data.techStack, 20)) &&
+             (!('challenges' in data) || data.challenges is string && data.challenges.size() < 2000) &&
+             (!('learnings' in data) || data.learnings is string && data.learnings.size() < 2000) &&
+             (!('imageUrl' in data) || data.imageUrl is string);
+    }
+
+    function isInvited(teamId) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      return isAuthenticated() && ('invitedEmails' in team) && request.auth.token.email in team.invitedEmails;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.email == resource.data.email;
+    }
+
+    match /teams/{teamId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTeam(request.resource.data) && 
+                    request.auth.uid in request.resource.data.members;
+      allow update: if isAuthenticated() && (
+                    (request.auth.uid in resource.data.members || request.auth.uid in request.resource.data.members) ||
+                    (request.auth.token.email in resource.data.invitedEmails && 
+                     !(request.auth.token.email in request.resource.data.invitedEmails))
+                  );
+    }
+
+    match /{path=**}/invitations/{invitationId} {
+      allow read: if isAuthenticated() && (
+        (resource.data.email != null && request.auth.token.email == resource.data.email) ||
+        (request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members) ||
+        (resource.data.email == null) // Shareable link
+      );
+      allow create: if isAuthenticated() && 
+                    request.auth.uid in get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.members &&
+                    isValidInvitation(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members) ||
+        (resource.data.email != null && request.auth.token.email == resource.data.email) ||
+        (resource.data.email == null && request.resource.data.status in ['accepted', 'declined'])
+      ) && isValidInvitation(request.resource.data);
+      allow delete: if isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members;
+    }
+
+    match /projects/{projectId} {
+      allow read: if resource.data.visibility == 'public' || 
+                    (isAuthenticated() && (
+                      request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members ||
+                      isInvited(resource.data.teamId)
+                    ));
+      allow create: if isAuthenticated() && isValidProject(request.resource.data) &&
+                    get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.members.hasAny([request.auth.uid]);
+      allow update: if isAuthenticated() && isValidProject(request.resource.data) &&
+                    get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members.hasAny([request.auth.uid]);
+    }
+  }
+}
